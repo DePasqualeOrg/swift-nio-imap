@@ -52,6 +52,22 @@ import Testing
         machine.sendCommand(.idleDone)
     }
 
+    @Test("untagged responses before the confirmation are accepted")
+    func untaggedBeforeConfirmationAccepted() {
+        var machine = ClientStateMachine.Idle()
+
+        // The server flushes pending notifications before confirming idle.
+        #expect(throws: Never.self) { try machine.receiveResponse(.untagged(.mailboxData(.exists(3)))) }
+        #expect(throws: Never.self) { try machine.receiveResponse(.fetch(.start(1))) }
+        #expect(throws: Never.self) { try machine.receiveResponse(.fetch(.simpleAttribute(.flags([.seen])))) }
+        #expect(throws: Never.self) { try machine.receiveResponse(.fetch(.finish)) }
+
+        // The confirmation still arrives and idling proceeds as usual.
+        #expect(throws: Never.self) { try machine.receiveContinuationRequest(.responseText(.init(text: "OK"))) }
+        #expect(throws: Never.self) { try machine.receiveResponse(.untagged(.mailboxData(.exists(4)))) }
+        machine.sendCommand(.idleDone)
+    }
+
     @Test("multiple idle confirmations throws error")
     func multipleIdleConfirmationsThrowsError() {
         var machine = ClientStateMachine.Idle()

@@ -43,13 +43,20 @@ extension ClientStateMachine {
             }
         }
 
+        /// Untagged data is accepted both before and after the server's continuation: a server
+        /// flushes pending mailbox notifications when it processes `IDLE`, and some send them
+        /// ahead of the `+`. Anything else is out of place in either state.
         mutating func receiveResponse(_ response: Response) throws {
-            switch self.state {
-            case .waitingForConfirmation:
-                // TODO: should ignore this
-                throw UnexpectedResponse(kind: .idleWaitingForConfirmation)
-            case .idling:
-                try self.receiveResponse_idlingState(response)
+            switch response {
+            case .untagged, .fetch:
+                break
+            case .tagged, .fatal, .authenticationChallenge, .idleStarted:
+                switch self.state {
+                case .waitingForConfirmation:
+                    throw UnexpectedResponse(kind: .idleWaitingForConfirmation)
+                case .idling:
+                    throw UnexpectedResponse(kind: .idleRunning)
+                }
             }
         }
 
@@ -59,16 +66,6 @@ extension ClientStateMachine {
                 self.state = .idling
             case .idling:
                 throw UnexpectedContinuationRequest(kind: .idle)
-            }
-        }
-
-        private func receiveResponse_idlingState(_ response: Response) throws {
-            assert(self.state == .idling)
-            switch response {
-            case .untagged, .fetch:
-                break
-            case .tagged, .fatal, .authenticationChallenge, .idleStarted:
-                throw UnexpectedResponse(kind: .idleRunning)
             }
         }
     }

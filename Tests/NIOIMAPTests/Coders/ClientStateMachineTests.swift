@@ -370,6 +370,21 @@ extension ClientStateMachineTests {
         #expect(throws: InvalidCommandForState.self) { try stateMachine.sendCommand(.idleDone) }
     }
 
+    @Test("idle workflow with notifications before the confirmation")
+    func idleWorkflowUntaggedBeforeConfirmation() {
+        var stateMachine = makeStateMachine()
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A1", command: .idleStart))) }
+        #expect(throws: Never.self) { try stateMachine.receiveResponse(.untagged(.mailboxData(.exists(3)))) }
+        #expect(throws: Never.self) {
+            try stateMachine.receiveContinuationRequest(.responseText(.init(text: "IDLE started")))
+        }
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.idleDone) }
+        #expect(throws: Never.self) {
+            try stateMachine.receiveResponse(.tagged(.init(tag: "A1", state: .ok(.init(text: "IDLE terminated")))))
+        }
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A2", command: .noop))) }
+    }
+
     @Test("idle workflow multiple continuation requests")
     func idleWorkflowMultipleContinuationRequests() {
         var stateMachine = makeStateMachine()
