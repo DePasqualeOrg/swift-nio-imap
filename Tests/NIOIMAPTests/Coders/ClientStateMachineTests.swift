@@ -294,6 +294,82 @@ extension ClientStateMachineTests {
         #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A3", command: .noop))) }
     }
 
+    @Test("idle ended by the server's tagged response returns to normal operation")
+    func idleEndedByTaggedResponse() throws {
+        var stateMachine = makeStateMachine()
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A1", command: .idleStart))) }
+        #expect(throws: Never.self) {
+            try stateMachine.receiveContinuationRequest(.responseText(.init(text: "IDLE started")))
+        }
+
+        // The server ends IDLE without a DONE from the client.
+        #expect(throws: Never.self) {
+            try stateMachine.receiveResponse(.tagged(.init(tag: "A1", state: .ok(.init(text: "IDLE terminated")))))
+        }
+
+        // A DONE the client had already decided to send is accepted as an empty write; a
+        // second one is out of context. Normal commands are accepted again.
+        let done = try stateMachine.sendCommand(.idleDone)
+        #expect(done?.bytes.readableBytes == 0)
+        #expect(done?.shouldSucceedPromise == true)
+        #expect(throws: InvalidCommandForState.self) { try stateMachine.sendCommand(.idleDone) }
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A2", command: .noop))) }
+        #expect(throws: Never.self) {
+            try stateMachine.receiveResponse(.tagged(.init(tag: "A2", state: .ok(.init(text: "OK")))))
+        }
+    }
+
+    @Test("a command after a server-ended idle clears the tolerance for a late DONE")
+    func commandAfterServerEndedIdleClearsLateDoneTolerance() throws {
+        var stateMachine = makeStateMachine()
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A1", command: .idleStart))) }
+        #expect(throws: Never.self) {
+            try stateMachine.receiveContinuationRequest(.responseText(.init(text: "IDLE started")))
+        }
+        #expect(throws: Never.self) {
+            try stateMachine.receiveResponse(.tagged(.init(tag: "A1", state: .ok(.init(text: "IDLE terminated")))))
+        }
+
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A2", command: .noop))) }
+        #expect(throws: Never.self) {
+            try stateMachine.receiveResponse(.tagged(.init(tag: "A2", state: .ok(.init(text: "OK")))))
+        }
+        #expect(throws: InvalidCommandForState.self) { try stateMachine.sendCommand(.idleDone) }
+    }
+
+    @Test("idle rejected before confirmation returns to normal operation")
+    func idleRejectedBeforeConfirmation() throws {
+        var stateMachine = makeStateMachine()
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A1", command: .idleStart))) }
+
+        // The server refuses IDLE with a tagged NO instead of the continuation.
+        #expect(throws: Never.self) {
+            try stateMachine.receiveResponse(.tagged(.init(tag: "A1", state: .no(.init(text: "IDLE unavailable")))))
+        }
+
+        let done = try stateMachine.sendCommand(.idleDone)
+        #expect(done?.bytes.readableBytes == 0)
+        #expect(done?.shouldSucceedPromise == true)
+        #expect(throws: InvalidCommandForState.self) { try stateMachine.sendCommand(.idleDone) }
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A2", command: .noop))) }
+    }
+
+    @Test("a second DONE after a client-ended idle is still out of context")
+    func secondDoneAfterClientEndedIdleThrows() {
+        var stateMachine = makeStateMachine()
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.tagged(.init(tag: "A1", command: .idleStart))) }
+        #expect(throws: Never.self) {
+            try stateMachine.receiveContinuationRequest(.responseText(.init(text: "IDLE started")))
+        }
+        #expect(throws: Never.self) { try stateMachine.sendCommand(.idleDone) }
+        #expect(throws: Never.self) {
+            try stateMachine.receiveResponse(.tagged(.init(tag: "A1", state: .ok(.init(text: "IDLE terminated")))))
+        }
+
+        // The tolerance exists only for a server-ended IDLE.
+        #expect(throws: InvalidCommandForState.self) { try stateMachine.sendCommand(.idleDone) }
+    }
+
     @Test("idle workflow multiple continuation requests")
     func idleWorkflowMultipleContinuationRequests() {
         var stateMachine = makeStateMachine()

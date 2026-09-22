@@ -192,6 +192,10 @@ struct ClientStateMachine {
 
     var state: State = .expectingNormalResponse
     private var activeCommandTags: Set<String> = []
+    /// Set when the server ends IDLE with its tagged response before the client's `DONE`. The
+    /// `DONE` a client then sends has nothing left to end and is accepted as an empty write;
+    /// the flag is cleared by that `DONE` or by the next tagged or append command.
+    private var idleEndedByServer = false
     private var allocator: ByteBufferAllocator!
 
     // We mark where we should write up to at the next opportunity
@@ -258,6 +262,15 @@ struct ClientStateMachine {
 
         switch self.state {
         case .idle(var idleStateMachine):
+            // A tagged response while idling completes the IDLE command
+            // itself: the server rejected it or ended it on its own, so the
+            // client is back to normal operation and a DONE it still sends
+            // has nothing left to end.
+            if case .tagged = response {
+                self.state = .expectingNormalResponse
+                self.idleEndedByServer = true
+                return
+            }
             try idleStateMachine.receiveResponse(response)
             self.state = .idle(idleStateMachine)
         case .authenticating(var authStateMachine):
@@ -599,14 +612,26 @@ extension ClientStateMachine {
         }
 
         switch command {
+        case .idleDone where self.idleEndedByServer:
+            // The server ended IDLE before this DONE was written, so there is nothing to end.
+            // Accept it as an empty write so the client's promise completes normally.
+            self.idleEndedByServer = false
+            return .init(
+                chunks: [
+                    .init(bytes: self.allocator.buffer(capacity: 0), promise: promise, shouldSucceedPromise: true)
+                ],
+                nextContext: nil
+            )
         case .idleDone, .continuationResponse:
             // These can only arrive here if a malformed or forwarded command is fed to the state
             // machine out of context (e.g. a spurious `.continuationResponse` parsed from
             // untrusted bytes). Throw rather than crash the process.
             throw InvalidCommandForState(command)
         case .tagged(let tc):
+            self.idleEndedByServer = false
             return self.sendTaggedCommand(tc, promise: promise)
         case .append(let ac):
+            self.idleEndedByServer = false
             return try self.sendAppendCommand(ac, promise: promise)
         }
     }

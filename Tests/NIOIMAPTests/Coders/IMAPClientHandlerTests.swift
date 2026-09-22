@@ -602,6 +602,35 @@ struct IMAPClientHandlerTests {
         helper.expectInbound(.tagged(.init(tag: "A2", state: .ok(.init(code: nil, text: "")))))
     }
 
+    @Test("a DONE after the server ended IDLE writes nothing and succeeds")
+    func doneAfterServerEndedIdleWritesNothing() {
+        var helper = Helper()
+        defer {
+            helper.check()
+        }
+
+        helper.writeOutbound(.tagged(.init(tag: "A1", command: .idleStart)), wait: false)
+        helper.expectOutboundString("A1 IDLE\r\n")
+        helper.writeInbound("+ idling\r\n")
+        helper.expectInbound(.idleStarted)
+
+        // The server ends IDLE on its own before the client sends DONE.
+        helper.writeInbound("A1 OK Idle completed\r\n")
+        helper.expectInbound(.tagged(.init(tag: "A1", state: .ok(.init(code: nil, text: "Idle completed")))))
+
+        // The client's DONE completes without putting anything on the wire.
+        helper.writeOutbound(.idleDone)
+        var written: ByteBuffer?
+        #expect(throws: Never.self) { written = try helper.channel.readOutbound() }
+        #expect((written?.readableBytes ?? 0) == 0)
+
+        // Normal commands follow as usual.
+        helper.writeOutbound(.tagged(.init(tag: "A2", command: .noop)), wait: false)
+        helper.expectOutboundString("A2 NOOP\r\n")
+        helper.writeInbound("A2 OK\r\n")
+        helper.expectInbound(.tagged(.init(tag: "A2", state: .ok(.init(code: nil, text: "")))))
+    }
+
     @Test("promises are failed on channel close")
     func promisesAreFailedOnChannelClose() {
         var helper = Helper()
